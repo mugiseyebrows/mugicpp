@@ -1,0 +1,22 @@
+{
+  "name": "mugicpp",
+  "version": "1.0.0",
+  "description": "Code generation tool for C++",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mugiseyebrows/mugicpp.git"
+  },
+  "keywords": [
+    "cpp"
+  ],
+  "author": "Doronin Stanislav <mugisbrows@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mugiseyebrows/mugicpp/issues"
+  },
+  "homepage": "https://github.com/mugiseyebrows/mugicpp#readme"
+}
