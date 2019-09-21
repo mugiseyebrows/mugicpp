@@ -161,7 +161,7 @@ foo.method(parseMethod(
 
 ### Named arguments
 
-If you want to implement "named arguments" pattern, there are `CppNamedArgs` class for this. It creates two classes - heavy implementation and lightweight stack-friendly proxy with chainable methods that calls implementation methods over a pointer.
+If you want to implement "named arguments" pattern, there is `CppNamedArgs` class for this. It creates two classes - heavy implementation and lightweight stack-friendly proxy with chainable methods that calls implementation methods over a pointer.
 
 ### Singleton
 
