@@ -398,7 +398,10 @@ function splitSignature(signature) {
         }
         p = c
     })
-    args.push(arg)
+    arg = arg.trim()
+    if (arg.length > 0) {
+        args.push(arg)
+    }
     return args.map(e => e.trim())
 }
 
@@ -410,6 +413,24 @@ function stripOptional(signature, join = true) {
 function signatureNames(signature, join = true) {
     let args = stripOptional(signature, false).map(arg => arg.match(/(\w+)$/)[1] )
     return join === true ? args.join(', ') : args
+}
+
+function parseSignature(signature) {
+
+    let args = splitSignature(signature)
+    let names = signatureNames(signature, false)
+    let nameTypes = {}
+    let optional = {}
+    args.forEach((arg,i) => {
+        let name = names[i]
+        let opt = arg.split('=')[1]
+        if (opt !== undefined) {
+            optional[name] = opt.trim()
+        }
+        let type = arg.substring(0, (arg.split('=')[0]).lastIndexOf(names[i])).trim()
+        nameTypes[name] = type
+    })
+    return [nameTypes, optional]
 }
 
 function parseInitList(initList) {
@@ -442,16 +463,16 @@ function parseInitList(initList) {
 
 class CppMethod {
  
-    constructor(name, type, signature, implementation = '', access = acc.PUBLIC, flags = 0) {
+    constructor(name, type, signature, implementation_ = '', access = acc.PUBLIC, flags = 0) {
         this._name = name
         this._type = type
         this._signature = signature
-        this._implementation = implementation
+        this._implementation = implementation_
         this._access = access
         this._flags = flags
     }
 
-    declaration(className, access) {
+    declaration(className, access, options) {
         if (access !== this._access) {
             return undefined
         }
@@ -460,24 +481,33 @@ class CppMethod {
         let static_ = (flags & met.STATIC) ? 'static' : ''
         let virtual = ((flags & met.VIRTUAL) || (flags & met.PUREVIRTUAL)) ? 'virtual' : ''
 
-        if (this._type === undefined) {
-            console.log(this)
-        }
-
         let type = stripClass(this._type, className)
         let pure = (flags & met.PUREVIRTUAL) ? '= 0' : '';
         let signature = this._signature
+
+        if (isObject(signature)) {
+            signature = (new CppSignature(options)).signature(signature)
+        }
+
         return `${static_} ${virtual} ${type} ${this._name}(${signature}) ${const_} ${pure};`
     }
 
-    implementation(className) {
+    implementation(className, options) {
         let flags = this._flags
         if (flags & met.PUREVIRTUAL) {
             return undefined
         }
         let const_ = (flags & met.CONST) ? 'const' : ''
         let type = this._type
-        let signature = stripOptional(this._signature)
+
+        let signature = this._signature
+
+        if (isObject(signature)) {
+            signature = (new CppSignature(options)).signature(signature)
+        } else {
+            signature = stripOptional(signature)
+        }
+
         let scope = className === undefined ? '' : className + '::'
         return `${type} ${scope}${this._name}(${signature}) ${const_}{\n${valueOrBlank(this._implementation)}\n}`
     }
@@ -598,7 +628,6 @@ function parseDestructor(text) {
 }
 
 /**
- * 
  * @param {string} text 
  * @param {number} access 
  */
@@ -620,44 +649,10 @@ function parseConstructor(text, access) {
         init = parseInitList(m[1])
     } 
 
-    let args = {}
-    let optional = {}
-
-    let trimAll = (vs) => vs.map(v => v.trim())
-
-    //console.log(['signature',text.substr(open + 1, close - open - 1)])
-
-    let x = splitSignature(text.substring(signatureStart + 1, signatureEnd)).map(arg => {
-        if (arg.length === 0) {
-            return
-        }
-
-        let optional_, type, name, _
-        let m = arg.match(/(.*)=(.*)/)
-        if (m !== null) {
-            [_, arg, optional_] = trimAll(m)
-        }
-
-        m = arg.match(/(.*)\s+(\w+)/)
-        if (m !== null) {
-            [_, type, name] = trimAll(m)
-        }
-
-        m = arg.match(/const (.*)&(.*)/)
-        if (m !== null) {
-            [_, type, name] = trimAll(m)
-        }
-        if (optional_ !== undefined) {
-            optional[arg] = optional_
-        }
-        args[name] = type
-    })
-
-    //console.log(text, args, optionals, init)
-
-    return new CppConstructor(args, optional, init, implementation, access)
+    let signature = text.substring(signatureStart + 1, signatureEnd)
+    
+    return new CppConstructor(signature, init, implementation, access)
 }
-
 
 function parseMethod(text, access = acc.PUBLIC) {
 
@@ -766,18 +761,18 @@ class CppMember {
     }
 
 
-    declaration(className, access) {
+    declaration(className, access, options) {
         let result = [this._getter, this._setter]
-            .map(method => method === undefined ? undefined : method.declaration(className, access))
+            .map(method => method === undefined ? undefined : method.declaration(className, access, options))
         if (access === this._options.access) {
             result.push(`${stripClass(this._type, className)} ${this._name};`)
         }
         return joinDefinedIfAny(result)
     }
 
-    implementation(className) {
+    implementation(className, options) {
         let result = [this._getter, this._setter]
-            .map(method => method === undefined ? undefined : method.implementation(className))
+            .map(method => method === undefined ? undefined : method.implementation(className, options))
         return joinDefinedIfAny(result)
     }
 }
@@ -792,11 +787,10 @@ function parseMember(text, access) {
 
 
 class CppConstructor {
-    constructor(args = {}, optional = {}, init = {}, implementation = '', access = acc.PUBLIC, explicit = false) {
-        this._args = args
-        this._optional = optional
+    constructor(signature = '', init = '', implementation_ = '', access = acc.PUBLIC, explicit = false) {
+        this._signature = signature
         this._init = init
-        this._implementation = implementation
+        this._implementation = implementation_
         this._access = access
         this._explicit = explicit
     }
@@ -804,19 +798,39 @@ class CppConstructor {
     /**
      * @param {boolean} withOptional 
      */
-    _signature(withOptional, options) {
-        let signature = new CppSignature(options)
-        return signature.signature(this._args, this._optional, withOptional)
+    _signature_(withOptional, options) {
+        let signature = this._signature
+        let nameTypes, optional = {}
+        if (isString(signature)) {
+            [nameTypes, optional] = parseSignature(signature)
+        } else {
+            nameTypes = signature
+        }
+        
+        return (new CppSignature(options)).signature(nameTypes, optional, withOptional)
     }
 
     /**
      * @param {CppMember[]} members 
      */
     _initialization(members) {
-        let result = []
-        let argNames = Object.keys(this._args)
-        let init = this._init
+        
+        let signature = this._signature
+        let nameTypes = {}
 
+        if (isString(signature)) {
+            [nameTypes] = parseSignature(signature)
+        } else {
+            nameTypes = signature
+        }
+
+        let argNames = Object.keys(nameTypes)
+        let init = this._init
+        if (isString(init)) {
+            init = parseInitList(init)
+        }
+
+        let result = []
         for (var name in init) {
             result.push(`${name}(${init[name]})`)
         }
@@ -832,9 +846,6 @@ class CppConstructor {
                 result.push(`${mName}(${member._value})`)
             }
         })
-        if (this._baseConstructor !== undefined) {
-            result.push(this._baseConstructor)
-        }
         if (result.length > 0) {
             return ':' + result.join(', ')
         }
@@ -866,14 +877,15 @@ class CppConstructor {
      * @param {number} access 
      */
     declaration(className, access, options) {
-        if (access === this._access) {
-            let explicit = this._explicit ? 'explicit' : ''
-            return `${explicit} ${className}(${this._signature(true, options)});`
+        if (access !== this._access) {
+            return undefined
         }
+        let explicit = this._explicit ? 'explicit' : ''
+        return `${explicit} ${className}(${this._signature_(true, options)});`
     }
 
     implementation(className, members, options) {
-        return `${className}::${className}(${this._signature(false, options)}) ${this._initialization(members)} {\n${this._implementation}\n}`
+        return `${className}::${className}(${this._signature_(false, options)}) ${this._initialization(members)} {\n${this._implementation}\n}`
     }
 
 }
@@ -1260,7 +1272,7 @@ class CppClass {
     /**
      * @param {string} name 
      * @param {string} type 
-     * @param {string} signature 
+     * @param {string|object} signature 
      * @param {string} implementation 
      * @param {number} access 
      * @param {number} flags 
@@ -1277,7 +1289,7 @@ class CppClass {
 
     /**
      * @param {string} name 
-     * @param {string} signature 
+     * @param {string|object} signature 
      * @returns {CppMethod}
      */
     signal(name, signature) {
@@ -1292,7 +1304,7 @@ class CppClass {
     /**
      * 
      * @param {string} name 
-     * @param {string} signature 
+     * @param {string|object} signature 
      * @param {string} implementation 
      * @param {number} access 
      * @returns {CppMethod}
@@ -1307,10 +1319,12 @@ class CppClass {
     }
 
     /**
-     * @param {CppMethod} function_ 
-     * @returns {CppMethod}
+     * @param {string} name 
+     * @param {string} type 
+     * @param {string|object} signature 
+     * @param {string} implementation 
      */
-    function_(name, type, signature, implementation = '') {
+    function_(name, type, signature = '', implementation = '') {
         if (name instanceof CppMethod) {
             this._functions.push(name)
         } else {
@@ -1328,22 +1342,48 @@ class CppClass {
         return lastItem(dest)
     }
 
+    /**
+     * @param {string} name 
+     * @param {string} type 
+     * @param {string|object} signature 
+     * @param {string} implementation 
+     * @param {number} flags 
+     */
     methodOperator(name, type, signature, implementation, flags = 0) {
         return this._operator(this._methods, name, type, signature, implementation, flags)
     }
 
+    /**
+     * @param {string} name 
+     * @param {string} type 
+     * @param {string|object} signature 
+     * @param {string} implementation 
+     * @param {number} flags 
+     * @returns {CppMethod}
+     */
     functionOperator(name, type, signature, implementation, flags = 0) {
         return this._operator(this._functions, name, type, signature, implementation, flags)
     }
 
+    /**
+     * 
+     * @param {string} name 
+     * @param {number} access 
+     * @returns {CppClass}
+     */
     inherits(name, access = acc.PUBLIC) {
         this._inheritance.push(name, access)
+        return this
     }
 
     /**
-     * @param {CppInclude} include 
+     * @param {string} name 
+     * @param {boolean} header 
+     * @param {boolean} global 
+     * @param {boolean} forward 
+     * @returns {CppInclude}
      */
-    include(name, header, global, forward) {
+    include(name, header = true, global = false, forward = false) {
         if (name instanceof CppInclude) {
             this._includes.push(name)
         } else {
@@ -1353,17 +1393,27 @@ class CppClass {
     }
 
     /**
-     * @param {CppConstructor} constructor_ 
+     * @param {string|object} signature 
+     * @param {string|object} init 
+     * @param {string} implementation 
+     * @param {number} access 
+     * @param {boolean} explicit 
+     * @returns {CppConstructor}
      */
-    constructor_(args = {}, optional = {}, init = {}, implementation = '', access = acc.PUBLIC, explicit = false) {
-        if (args instanceof CppConstructor) {
-            this._constructors.push(args)
+    constructor_(signature = '', init = '', implementation = '', access = acc.PUBLIC, explicit = false) {
+        if (signature instanceof CppConstructor) {
+            this._constructors.push(signature)
         } else {
-            this._constructors.push(new CppConstructor(args, optional, init, implementation, access, explicit))
+            this._constructors.push(new CppConstructor(signature, init, implementation, access, explicit))
         }
         return lastItem(this._constructors)
     }
 
+    /**
+     * @param {string} implementation 
+     * @param {number} flags 
+     * @returns {CppDestructor}
+     */
     destructor(implementation, flags = 0) {
         if (implementation instanceof CppDestructor) {
             this._destructor = implementation
@@ -1388,6 +1438,7 @@ class CppClass {
 
     /**
      * @param {string} value 
+     * @returns {CppClass}
      */
     declspec(value) {
         this._declspec = value
@@ -1396,17 +1447,26 @@ class CppClass {
 
     /**
      * @param {boolean} value
+     * @returns {CppClass}
      */
     qobject(value = true) {
         this._qobject = value ? 'Q_OBJECT' : ''
         return this
     }
 
+    /**
+     * @param {number} style 
+     * @returns {CppClass}
+     */
     style(style) {
         this._options.style = style
         return this
     }
 
+    /**
+     * @param {boolean} value 
+     * @returns {CppClass}
+     */
     metatype(value = true) {
         this._metatype = value ? `Q_DECLARE_METATYPE(${this._name})` : ''
         return this
@@ -1414,8 +1474,7 @@ class CppClass {
 
     /**
      * @param {string} value 
-     * @param {string} namespace 
-     * @returns {CppDefinition}
+     * @param {number} scope 
      */
     definition(value, scope = sc.GLOBAL) {
         if (value instanceof CppDefinition) {
@@ -1449,8 +1508,8 @@ class CppClass {
         let guard = new CppGuard(className, options.guard)
         let warning = new CppWarning(options.warning)
         let declarations = [acc.PUBLIC, acc.SIGNAL, acc.SLOT_PUBLIC, acc.PROTECTED, acc.SLOT_PROTECTED, acc.PRIVATE, acc.SLOT_PRIVATE].map(access => {
-            let methods = this._methods.map(method => method.declaration(className, access))
-            let members = this._members.map(member => member.declaration(className, access))
+            let methods = this._methods.map(method => method.declaration(className, access, options))
+            let members = this._members.map(member => member.declaration(className, access, options))
             let constructors = this._constructors.map(constructor_ => constructor_.declaration(className, access, options))
             let globals = this._globals.map(global => global.declaration(access, true))
             let definitions = access === acc.PUBLIC ? this._definitions.map(forward => forward.value(sc.CLASS)) : []
@@ -1464,7 +1523,7 @@ class CppClass {
             includes = this._declarationIncludes().map(include => include.declaration())
         }
 
-        let functions = this._functions.map(function_ => function_.declaration(className, acc.PUBLIC))
+        let functions = this._functions.map(function_ => function_.declaration(className, acc.PUBLIC, options))
         let externals = this._globals.map(global => global.declaration(acc.PUBLIC, false))
 
         let definitions = (scope) => joinDefined(this._definitions.map(forward => forward.value(scope)))
@@ -1492,11 +1551,11 @@ class CppClass {
         let className = this._name
         let options = this._options
         let methods = this._methods.filter(method => method._access !== acc.SIGNAL).map(method => method.implementation(className))
-        let members = this._members.map(member => member.implementation(className))
+        let members = this._members.map(member => member.implementation(className, options))
         let constructors = this._constructors.map(constructor_ => constructor_.implementation(className, this._members, options))
         let destructor = (this._destructor !== undefined) ? this._destructor.implementation(className) : undefined
         let globals = this._globals.map(global => global.implementation(className))
-        let functions = this._functions.map(function_ => function_.implementation())
+        let functions = this._functions.map(function_ => function_.implementation(undefined, options))
         let implementations = [...constructors, destructor, ...members, ...methods, ...functions, ...globals]
         
         let includes = []
@@ -1681,14 +1740,14 @@ class CppClassGroup {
 function matchingBracket(text, pos) {
     let open = text[pos]
     let close = open === '(' ? ')' : '}'
-    let l = 0
+    let d1 = 0
     for (var i=pos;i<text.length;i++) {
         if (text[i] == open) {
-            l += 1
+            d1 += 1
         } else if (text[i] == close) {
-            l -= 1
+            d1 -= 1
         }
-        if (l == 0 && text[i] == close) {
+        if (d1 == 0 && text[i] == close) {
             return i
         }
     }
@@ -1817,8 +1876,17 @@ class CppNamedArgs {
         return member
     }
 
+    /**
+     * @param {string} name 
+     * @param {string} type 
+     * @param {string|object} signature 
+     * @param {string} implementation 
+     * @param {number} access 
+     * @param {number} flags 
+     */
     method(name, type, signature, implementation = undefined, access = acc.PUBLIC, flags = 0) {
-        let implCall = `mImpl->${name}(${signatureNames(signature)})`
+        let signatureNames_ = isObject(signature) ? Object.keys(signature).join(', ') : signatureNames(signature)
+        let implCall = `mImpl->${name}(${signatureNames_})`
         let implementation_ = type === cpp.void ? `${implCall}; return *this;` : `return ${implCall};`
         let type_ = type === cpp.void ? this._proxyRef() : type
         this._proxy.method(name, type_, signature, implementation_, access, flags)
