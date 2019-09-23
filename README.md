@@ -126,7 +126,7 @@ and to cpp
 
 ```js
 foo.inherits('BaseFoo')
-foo.constructor_({bar: cpp.int},{},{BaseFoo: 'bar'})
+foo.constructor_('int bar' ,{BaseFoo: 'bar'})
 ```
 
 This adds inheritance and passes bar arg to base constructor
