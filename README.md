@@ -12,7 +12,7 @@ npm i mugicpp --save
 ### Import
 
 ```js
-const {acc, met, qt, cpp, sc, st, CppClass, parseClass, parseMethod} = require('mugicpp')
+const {acc, qt, cpp, sc, st, CppClass, CppSignature, parseClass, parseMethod, ref, constRef, pointer, constp} = require('mugicpp')
 ```
 
 ### Class
@@ -20,11 +20,11 @@ const {acc, met, qt, cpp, sc, st, CppClass, parseClass, parseMethod} = require('
 ```js
 let foo = new CppClass('Foo')
 foo.constructor_()
-foo.constructor_({foo: cpp.int, bar: qt.QString},{bar:'"test"'})
-foo.destructor('').virtual()
+foo.constructor_('int foo, const QString& bar')
+foo.destructor().virtual()
 ```
 
-This creates class with empty constructor and parametrized constructor `Foo(int foo, const QString& bar = "test")` and virtual destructor with empty implementation.
+This creates class with empty constructor and parametrized constructor and virtual destructor with empty implementation.
 
 ### Members
 
@@ -33,7 +33,8 @@ foo.member('mBar', cpp.int, 0)
 foo.member('mFoo', qt.QString, undefined, {getter: true, setter: false, access: acc.PRIVATE})
 ```
 
-This creates `int` member `mBar` with default value 0, to which it will be initialized in empty constructor, but in parametrized constructor it will be initialized to `bar` argument value because members bound to constructor args by name. `mBar` is protected, `mFoo` is private
+This creates `int` member `mBar` with default value 0, to which it will be initialized in empty constructor, but in parametrized constructor it will be initialized to `bar` argument value because members bound to constructor args by name. `mBar` is protected, `mFoo` is private. 
+Getters and setters are public by default or have access specified in options, like this: `{getter: acc.PROTECTED, setter: acc.PRIVATE}` (`{getter: true}` is the same as `{getter: acc.PUBLIC}`)
 
 ### Getters and setters
 
@@ -42,9 +43,9 @@ Getter and setter names can be overriden with `style` `CppClass` option.
 
 | style | getter | setter |
 |-------------|--------------|--------------|
-| `{style: st.SETTER_SET_NAME}` (default) | `bar()` | `setBar(int value)` |
-| `{style: 0}` | `bar()` | `bar(int value)` |
-| `{style: st.GETTER_GET_NAME + st.SETTER_SET_NAME}` | `getBar()` | `setBar(int value)` |
+| `st.SETTER_SET_NAME` (default) | `bar()` | `setBar(int value)` |
+| `0` | `bar()` | `bar(int value)` |
+| `st.GETTER_GET_NAME + st.SETTER_SET_NAME` | `getBar()` | `setBar(int value)` |
 
 ### Methods
 
@@ -174,6 +175,32 @@ There is `CppClassGroup` for creating multiple coupled classes in single pair of
 ### Only functions
 
 There is `CppNoClass` for functions-only units.
+
+### Signature
+
+Signatures for methods, functions, constructors and operators can be expressed as string or as `name: type` object. Simple types, references and pointers will be passed by value, all other types (except ones in `simpleTypes` in `CppClass` constructor options) will be passed as constant reference.
+
+```js
+let foo = new CppClass('Foo', {simpleTypes: ['Bar']})
+foo.method('foo', cpp.void, 'int a, const QString& b, Bar c, QString& d')
+```
+
+can be writen as
+
+```js
+let foo = new CppClass('Foo', {simpleTypes: ['Bar']})
+foo.method('foo', cpp.void, {a: cpp.int, b: qt.QString, c: 'Bar', d: ref(qt.QString)})
+```
+
+To use later form with optional arguments there is `CppSignature` class with `signature(nameValues, nameOptionals)` method
+
+```js
+let options = {simpleTypes: ['Bar']}
+let m = new CppClass('Model', options)
+m.inherits('QStandardItemModel')
+let s = new CppSignature(options)
+m.constructor_(s.signature({rows: cpp.int, columns: cpp.int, parent: pointer(qt.QObject)},{parent: 0}),{QStandardItemModel: 'rows, columns, parent'})
+```
 
 ### Output
 

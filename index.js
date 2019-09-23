@@ -1487,7 +1487,7 @@ class CppClass {
      * @param {number} flags 
      * @returns {CppDestructor}
      */
-    destructor(implementation, flags = 0) {
+    destructor(implementation = '', flags = 0) {
         if (implementation instanceof CppDestructor) {
             this._destructor = implementation
         } else {

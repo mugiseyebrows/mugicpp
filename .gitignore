@@ -2,3 +2,5 @@ node_modules/
 test.js
 foo.cpp
 foo.h
+model.cpp
+model.h
