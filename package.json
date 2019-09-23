@@ -4,7 +4,7 @@
   "description": "Code generation tool for C++",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha"
   },
   "repository": {
     "type": "git",
@@ -18,5 +18,10 @@
   "bugs": {
     "url": "https://github.com/mugiseyebrows/mugicpp/issues"
   },
-  "homepage": "https://github.com/mugiseyebrows/mugicpp#readme"
+  "homepage": "https://github.com/mugiseyebrows/mugicpp#readme",
+  "dependencies": {},
+  "devDependencies": {
+    "chai": "^4.2.0",
+    "mocha": "^6.2.0"
+  }
 }

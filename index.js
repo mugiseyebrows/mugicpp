@@ -488,7 +488,7 @@ class CppMethod {
         if (isObject(signature)) {
             signature = (new CppSignature(options)).signature(signature)
         }
-
+        
         return `${static_} ${virtual} ${type} ${this._name}(${signature}) ${const_} ${pure};`
     }
 
@@ -571,6 +571,78 @@ class CppMethod {
             this._access = acc.SLOT
         }
         return this
+    }
+
+}
+
+/*
+
+const_
+virtual
+static
+pureVirtual
+public
+private
+protected
+
+^(.*)$
+\1(){\nthis._methods.forEach(method => method.\1())\nreturn this\n}\n
+
+ */
+
+
+class CppNamedArgsMethods {
+    /**
+     * @param {CppMethod[]} methods 
+     */
+    constructor(methods) {
+        this._methods = methods
+    }
+    const_() {
+        this._methods.forEach(method => method.const_())
+        return this
+    }
+
+    virtual() {
+        this._methods.forEach(method => method.virtual())
+        return this
+    }
+
+    static() {
+        this._methods.forEach(method => method.static())
+        return this
+    }
+
+    pureVirtual() {
+        this._methods.forEach(method => method.pureVirtual())
+        return this
+    }
+
+    public() {
+        this._methods.forEach(method => method.public())
+        return this
+    }
+
+    private() {
+        this._methods.forEach(method => method.private())
+        return this
+    }
+
+    protected() {
+        this._methods.forEach(method => method.protected())
+        return this
+    }
+
+    forEach(fn) {
+        this._methods.forEach(fn)
+    }
+
+    proxy() {
+        return this._methods[0]
+    }
+
+    impl() {
+        return this._methods[1]
     }
 
 }
@@ -708,7 +780,8 @@ class CppMember {
         this._name = name
         this._type = type
         this._value = value
-        this._options = defaults({style:0, access: acc.PROTECTED, getter: true, setter: true, simpleTypes: []}, options)
+        this._options = defaults({style:0, getter: true, setter: true, simpleTypes: [], access: acc.PROTECTED}, options)
+        this._access = this._options.access
         let {getter, setter} = this._options
         /**
          * @type {CppMethod}
@@ -719,7 +792,7 @@ class CppMember {
          */
         this._setter = undefined
 
-        if (setter !== undefined && setter !== false) {
+        if (setter !== false) {
             let access = acc.PUBLIC
             let implementation = undefined
             if (isNumber(setter)) {
@@ -731,7 +804,7 @@ class CppMember {
             }
             this._setter = new CppSetter(name, type, implementation, access, this._options)
         }
-        if (getter !== undefined && getter !== false) {
+        if (getter !== false) {
             let access = acc.PUBLIC
             let implementation = undefined
             if (isNumber(getter)) {
@@ -764,7 +837,7 @@ class CppMember {
     declaration(className, access, options) {
         let result = [this._getter, this._setter]
             .map(method => method === undefined ? undefined : method.declaration(className, access, options))
-        if (access === this._options.access) {
+        if (access === this._access) {
             result.push(`${stripClass(this._type, className)} ${this._name};`)
         }
         return joinDefinedIfAny(result)
@@ -1349,7 +1422,7 @@ class CppClass {
      * @param {string} implementation 
      * @param {number} flags 
      */
-    methodOperator(name, type, signature, implementation, flags = 0) {
+    methodOperator(name, type = cpp.void, signature = '', implementation = '', flags = 0) {
         return this._operator(this._methods, name, type, signature, implementation, flags)
     }
 
@@ -1361,7 +1434,7 @@ class CppClass {
      * @param {number} flags 
      * @returns {CppMethod}
      */
-    functionOperator(name, type, signature, implementation, flags = 0) {
+    functionOperator(name, type = cpp.void, signature = '', implementation = '', flags = 0) {
         return this._operator(this._functions, name, type, signature, implementation, flags)
     }
 
@@ -1550,7 +1623,7 @@ class CppClass {
         let warning = new CppWarning(this._options.warning)
         let className = this._name
         let options = this._options
-        let methods = this._methods.filter(method => method._access !== acc.SIGNAL).map(method => method.implementation(className))
+        let methods = this._methods.filter(method => method._access !== acc.SIGNAL).map(method => method.implementation(className, options))
         let members = this._members.map(member => member.implementation(className, options))
         let constructors = this._constructors.map(constructor_ => constructor_.implementation(className, this._members, options))
         let destructor = (this._destructor !== undefined) ? this._destructor.implementation(className) : undefined
@@ -1847,9 +1920,16 @@ function collectClassNames(classNames, ...names) {
     return classNames;
 }
 
+
 class CppNamedArgs {
-    constructor(implName, proxyName, options) {
-        this._options = defaults({simpleTypes: [], style: 0}, options, {classNames: collectClassNames(options.classNames,implName,proxyName)})
+    /**
+     * @param {string} implName 
+     * @param {string} proxyName 
+     * @param {object} options 
+     */
+    constructor(implName, proxyName, options = {}) {
+        this._options = defaults2({simpleTypes: [], style: 0, classNames: [implName, proxyName]}, options)
+        this._options.classNames = uniq(this._options.classNames)
         this._impl = new CppClass(implName, this._options)
         this._proxy = new CppClass(proxyName, this._options)
         let implPointer = this._implPointer()
@@ -1858,21 +1938,29 @@ class CppNamedArgs {
     }
 
     _implPointer() {
-        return this._impl._name + '*'
+        return pointer(this._impl._name)
     }
 
     _proxyRef() {
-        return this._proxy._name + '&'
+        return ref(this._proxy._name)
     }
 
-    member(name, type, value) {
-        let member = this._impl.member(name, type, value, this._options)
+    member(name, type, value, options) {
 
-        let getterName = member._getter._name
-        let setterName = member._setter._name
+        let options_ = defaults(this._options, options)
 
-        this._proxy.method(getterName, type, '', `return mImpl->${getterName}();`).const_()
-        this._proxy.method(setterName, ref(this._proxy._name), typeSign('value', type, this._options.simpleTypes), `mImpl->${setterName}(value); return *this;`)
+        let member = this._impl.member(name, type, value, options_)
+
+        if (options_.getter !== false) {
+            let getterName = member._getter._name
+            this._proxy.method(getterName, type, '', `return mImpl->${getterName}();`).const_()
+        }
+
+        if (options_.setter !== false) {
+            let setterName = member._setter._name
+            this._proxy.method(setterName, ref(this._proxy._name), typeSign('value', type, this._options.simpleTypes), `mImpl->${setterName}(value); return *this;`)
+        }
+        
         return member
     }
 
@@ -1883,16 +1971,19 @@ class CppNamedArgs {
      * @param {string} implementation 
      * @param {number} access 
      * @param {number} flags 
+     * @returns {CppNamedArgsMethods}
      */
-    method(name, type, signature, implementation = undefined, access = acc.PUBLIC, flags = 0) {
+    method(name, type = cpp.void, signature = '', implementation = undefined, access = acc.PUBLIC, flags = 0) {
         let signatureNames_ = isObject(signature) ? Object.keys(signature).join(', ') : signatureNames(signature)
         let implCall = `mImpl->${name}(${signatureNames_})`
         let implementation_ = type === cpp.void ? `${implCall}; return *this;` : `return ${implCall};`
         let type_ = type === cpp.void ? this._proxyRef() : type
-        this._proxy.method(name, type_, signature, implementation_, access, flags)
+        let ret = []
+        ret.push(this._proxy.method(name, type_, signature, implementation_, access, flags))
         if (implementation !== undefined) {
-            this._impl.method(name, type, signature, implementation, access, flags)
+            ret.push(this._impl.method(name, type, signature, implementation, access, flags))
         }
+        return new CppNamedArgsMethods(ret)
     }
 
     write(dest, cb = () => {}) {
