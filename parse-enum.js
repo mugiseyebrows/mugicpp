@@ -172,6 +172,12 @@ let enums =
         ItemIsAutoTristate = 64,
         ItemNeverHasChildren = 128,
         ItemIsUserTristate = 256
+    };
+    enum TextElideMode {
+        ElideLeft,
+        ElideRight,
+        ElideMiddle,
+        ElideNone
     };`
    
 

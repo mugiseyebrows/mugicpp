@@ -85,6 +85,9 @@ const qt = {
     QAxObject: 'QAxObject',
 
     // enums
+    Alignment: 'Qt::Alignment',
+    
+    // parsed enums
     Orientation: 'Qt::Orientation',
     Horizontal: 'Qt::Horizontal',
     Vertical: 'Qt::Vertical',
@@ -190,6 +193,11 @@ const qt = {
     ItemIsAutoTristate: 'Qt::ItemIsAutoTristate',
     ItemNeverHasChildren: 'Qt::ItemNeverHasChildren',
     ItemIsUserTristate: 'Qt::ItemIsUserTristate',
+    TextElideMode: 'Qt::TextElideMode',
+    ElideLeft: 'Qt::ElideLeft',
+    ElideRight: 'Qt::ElideRight',
+    ElideMiddle: 'Qt::ElideMiddle',
+    ElideNone: 'Qt::ElideNone',
 }
 
 const cpp = {
