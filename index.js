@@ -1108,6 +1108,15 @@ class CppInclude {
     implementation() {
         return this._header ? undefined : this._expression()
     }
+
+    global(value = true) {
+        this._global = value
+        return this
+    }
+    header(value = true) {
+        this._header = value
+        return this
+    }
 }
 
 /**
@@ -1116,10 +1125,13 @@ class CppInclude {
  * @param {string[]} classNames 
  * @returns {CppInclude[]}
  */
-function userIncludes(text, header, classNames) {
+function userIncludes(text, header, classNames, notIncludes) {
 
     let result = {}
     let add = (name, pointer) => {
+        if (notIncludes.indexOf(name) > -1) {
+            return
+        }
         if (result[name] === undefined) {
             result[name] = pointer
         } else if (pointer === false) {
@@ -1160,10 +1172,13 @@ function userIncludes(text, header, classNames) {
  * @param {boolean} header 
  * @returns {CppInclude[]}
  */
-function qtIncludes(text, header) {
+function qtIncludes(text, header, notIncludes) {
     let result = {}
     
     let add = (name, pointer) => {
+        if (notIncludes.indexOf(name) > -1) {
+            return
+        }
         if (result[name] === undefined) {
             result[name] = pointer
         } else if (pointer === false) {
@@ -1324,6 +1339,7 @@ class CppClass {
          * @type {CppInclude[]}
          */
         this._includes = []
+        this._notIncludes = []
         this._metatype = ''
     }
 
@@ -1465,6 +1481,10 @@ class CppClass {
         return lastItem(this._includes)
     }
 
+    notInclude(name) {
+        this._notIncludes.push(name)
+    }
+
     /**
      * @param {string|object} signature 
      * @param {string|object} init 
@@ -1567,12 +1587,15 @@ class CppClass {
 
     _declarationIncludes() {
         let declaration = this.declaration(false)
-        return [...qtIncludes(declaration, true), ...userIncludes(declaration, true, without(this._options.classNames, this._name)), ...this._includes]
+        return [...qtIncludes(declaration, true, this._notIncludes), 
+            ...userIncludes(declaration, true, without(this._options.classNames, this._name), this._notIncludes), 
+            ...this._includes]
     }
 
     _implementationIncludes() {
         let implementation = this.implementation(false)
-        return [...qtIncludes(implementation, false), ...userIncludes(implementation, false, prependNew(this._name, this._options.classNames))]
+        return [...qtIncludes(implementation, false, this._notIncludes), 
+            ...userIncludes(implementation, false, prependNew(this._name, this._options.classNames), this._notIncludes)]
     }
 
     declaration(withIncludes = true) {
