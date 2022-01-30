@@ -1734,7 +1734,7 @@ class CppClass {
     _implementationIncludes() {
         let implementation = this.implementation(false)
         let qtIncludes_ = qtIncludes(implementation, false)
-        let userIncludes_ = userIncludes(implementation, false, prependClassNames(this._name, this._options.classNames))
+        let userIncludes_ = userIncludes(implementation, false, prependClassNames(this._options.classNames, this._name))
         return [...qtIncludes_, ...userIncludes_]
     }
 
