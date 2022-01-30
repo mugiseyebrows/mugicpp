@@ -462,11 +462,21 @@ function uniq(vs) {
     return Array.from(new Set(vs))
 }
 
-function without(vs1,vs2) {
-    if (isArray(vs2)) {
-        return vs1.filter(v => vs2.indexOf(v) < 0)
+function classnamesWithout(classNames, excludeName) {
+    let res = []
+    for(item of classNames) {
+        if (isString(item)) {
+            if (item !== excludeName) {
+                res.push(item)
+            }
+        } else {
+            let {name, namespace} = item
+            if (name !== excludeName) {
+                res.push(item)
+            }
+        }
     }
-    return vs1.filter(v => v != vs2)
+    return res
 }
 
 function stripClass(type, className) {
@@ -1192,37 +1202,66 @@ class CppInclude {
      * @param {boolean} header 
      * @param {boolean} forward 
      */
-    constructor(name, header, global, forward) {
+    constructor(name, header, global, forward, namespace) {
         this._name = name
         this._header = header
         this._global = global
         this._forward = forward
+        this._namespace = namespace
+        //console.log('CppInclude',name, header, global, forward)
     }
 
-    _fileName() {
+    _fileName(options) {
         let name = this._name
         let isClass = name.toLowerCase() !== name
         let isQtClass = name.match(/^Q[A-Z]/) !== null
+        if (options.includeCallback) {
+            let res = options.includeCallback(this)
+            if (res !== undefined && res !== null) {
+                return res
+            }
+        }
         return isQtClass ? name : (isClass ? name.toLowerCase() + '.h' : name)
     }
 
-    _expression() {
+    _expression(options) {
         let head = this._global ? '<' : '"'
         let tail = this._global ? '>' : '"'
-        return `#include ${head}${this._fileName()}${tail}`
+        let value = `#include ${head}${this._fileName(options)}${tail}`
+        //console.log(this._name, '_expression', value)
+        return value
     }
 
-    declaration() {
+    declaration(options) {
         if (this._header) {
-            return this._expression()
+            return this._expression(options)
         } else if (this._forward) {
-            return `class ${this._name};`
+            if (this._namespace !== undefined) {
+                return `namespace ${this._namespace} { class ${this._name}; }`
+            } else {
+                return `class ${this._name};`
+            }
         }
     }
 
-    implementation() {
-        return this._header ? undefined : this._expression()
+    implementation(options) {
+        let value = this._header ? undefined : this._expression(options)
+        //console.log('CppInclude.implementation', this._name, value)
+        return value
     }
+}
+
+function matchClass(className, text, add) {
+    let regexp = new RegExp(className + '\\b\\s*[*&]?', 'gm')
+    let matched = text.match(regexp)
+    if (matched === null) {
+        return
+    }
+    matched.forEach(match => {
+        let [name] = match.split(/[*&]/).map(e => e.trim())
+        let pointer = match.match(/[*&]/) !== null
+        add(name, pointer)
+    })
 }
 
 /**
@@ -1242,17 +1281,17 @@ function userIncludes(text, header, classNames) {
         }
     }
 
+    let namespaces = {}
+
     classNames.forEach(className => {
-        let regexp = new RegExp(className + '\\b\\s*[*&]?', 'gm')
-        let matched = text.match(regexp)
-        if (matched === null) {
-            return
+
+        if (isString(className)) {
+            matchClass(className, text, add)
+        } else {
+            var {name, namespace} = className
+            namespaces[name] = namespace
+            matchClass(name, text, add)
         }
-        matched.forEach(match => {
-            let [name] = match.split(/[*&]/).map(e => e.trim())
-            let pointer = match.match(/[*&]/) !== null
-            add(name, pointer)
-        })
     })
 
     return Object.keys(result).map(name => {
@@ -1260,12 +1299,12 @@ function userIncludes(text, header, classNames) {
         if (header) {
             let pointer = result[name]
             if (pointer) {
-                return new CppInclude(name, false, global, true)
+                return new CppInclude(name, false, global, true, namespaces[name])
             } else {
-                return new CppInclude(name, true, global, false)
+                return new CppInclude(name, true, global, false, namespaces[name])
             }
         } else {
-            return new CppInclude(name, false, global, false)
+            return new CppInclude(name, false, global, false, namespaces[name])
         }
     })
 }
@@ -1331,6 +1370,12 @@ function prependNew(item, vs) {
         return [item, ...vs]
     }
     return vs
+}
+
+function prependClassNames(classNames, newItem) {
+    let excludeName = isString(newItem) ? newItem : newItem.name
+    let tail = classnamesWithout(classNames, excludeName)
+    return [newItem, ...tail]
 }
 
 function joinDefined(values, glue = '\n') {
@@ -1682,12 +1727,15 @@ class CppClass {
 
     _declarationIncludes() {
         let declaration = this.declaration(false)
-        return [...qtIncludes(declaration, true), ...userIncludes(declaration, true, without(this._options.classNames, this._name)), ...this._includes]
+        return [...qtIncludes(declaration, true), 
+            ...userIncludes(declaration, true, classnamesWithout(this._options.classNames, this._name)), ...this._includes]
     }
 
     _implementationIncludes() {
         let implementation = this.implementation(false)
-        return [...qtIncludes(implementation, false), ...userIncludes(implementation, false, prependNew(this._name, this._options.classNames))]
+        let qtIncludes_ = qtIncludes(implementation, false)
+        let userIncludes_ = userIncludes(implementation, false, prependClassNames(this._name, this._options.classNames))
+        return [...qtIncludes_, ...userIncludes_]
     }
 
     declaration(withIncludes = true) {
@@ -1708,7 +1756,7 @@ class CppClass {
         let includes = []
 
         if (withIncludes) {
-            includes = this._declarationIncludes().map(include => include.declaration())
+            includes = this._declarationIncludes().map(include => include.declaration(this._options))
         }
 
         let functions = this._functions.map(function_ => function_.declaration(className, acc.PUBLIC, options))
@@ -1749,9 +1797,15 @@ class CppClass {
         let includes = []
 
         if (withIncludes) {
-            includes = concatIncludes(this._declarationIncludes(), this._implementationIncludes())
-                            .map(include => include.implementation())
+
+            let declarationIncludes = this._declarationIncludes()
+            let implementationIncludes = this._implementationIncludes()
+
+            includes = concatIncludes(declarationIncludes, implementationIncludes)
+                            .map(include => include.implementation(this._options))
         }
+
+        //console.log(withIncludes, 'includes', includes)
 
         let definitions = (scope) => joinDefined(this._definitions.map(definition => definition.value(scope)))
 
@@ -1767,8 +1821,18 @@ class CppClass {
 
     write(dest, cb = () => {}) {
         let n = this._name.toLowerCase()
-        let h = path.join(dest, n + '.h')
-        let cpp = path.join(dest, n + '.cpp')
+        let options = this._options
+
+        let h
+        let cpp
+        if (options.nameWithNamespace && options.namespace) {
+            h = path.join(dest, `${options.namespace}_${n}.h`)
+            cpp = path.join(dest, `${options.namespace}_${n}.cpp`)
+        } else {
+            h = path.join(dest, `${n}.h`)
+            cpp = path.join(dest, `${n}.cpp`)
+        }
+
         fs.writeFileSync(h, this.declaration(true))
         fs.writeFileSync(cpp, this.implementation(true))
         clangFormat(h, cpp, cb)
@@ -1873,11 +1937,11 @@ class CppClassGroup {
         return lastItem(this._definitions)
     }
 
-    include(name, header, global, forward) {
+    include(name, header, global, forward, namespace) {
         if (name instanceof CppInclude) {
             this._includes.push(name)
         } else {
-            this._includes.push(new CppInclude(name, header, global, forward))
+            this._includes.push(new CppInclude(name, header, global, forward, namespace))
         }
         return lastItem(this._includes)
     }
@@ -1888,7 +1952,7 @@ class CppClassGroup {
         return joinDefined([
             this._warning.value(),
             this._guard.head(),
-            ...this._includes.map(include => include.declaration()), 
+            ...this._includes.map(include => include.declaration(this._options)), 
             definitions(sc.GLOBAL),
             this._namespace.head(), 
             definitions(sc.NAMESPACE),
@@ -1901,9 +1965,12 @@ class CppClassGroup {
     implementation() {
         let implementations = this._classes.map(class_ => class_.implementation(this._options.includes))
         let definitions = (scope) => joinDefinedIfAny(this._definitions.map(definition => definition.value(scope)))
+
+        let includes = this._includes.map(include => include.implementation(this._options))
+
         return joinDefined([
             this._warning.value(),
-            ...this._includes.map(include => include.implementation()), 
+            ...includes, 
             definitions(sc.IMPLEMENTATION_GLOBAL),
             this._namespace.head(), 
             definitions(sc.IMPLEMENTATION_NAMESPACE),
@@ -2035,6 +2102,20 @@ function collectClassNames(classNames, ...names) {
     return classNames;
 }
 
+function uniqClassNames(items) {
+    let res = {}
+    for(let item of items) {
+        if (isString(item)) {
+            if (res[item] === undefined) {
+                res[item] = item
+            }
+        } else {
+            let {name, namespace} = item
+            res[name] = item
+        }
+    }
+    return Object.values(res)
+}
 
 class CppNamedArgs {
     /**
@@ -2044,7 +2125,7 @@ class CppNamedArgs {
      */
     constructor(implName, proxyName, options = {}) {
         this._options = defaults2({simpleTypes: [], style: 0, classNames: [implName, proxyName]}, options)
-        this._options.classNames = uniq(this._options.classNames)
+        this._options.classNames = uniqClassNames(this._options.classNames)
         this._impl = new CppClass(implName, this._options)
         this._proxy = new CppClass(proxyName, this._options)
         let implPointer = this._implPointer()
