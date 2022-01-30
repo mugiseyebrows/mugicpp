@@ -1,6 +1,6 @@
 {
   "name": "mugicpp",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Code generation tool for C++",
   "main": "index.js",
   "scripts": {
