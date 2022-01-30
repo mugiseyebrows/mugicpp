@@ -1826,8 +1826,8 @@ class CppClass {
         let h
         let cpp
         if (options.nameWithNamespace && options.namespace) {
-            h = path.join(dest, `${options.namespace}_${n}.h`)
-            cpp = path.join(dest, `${options.namespace}_${n}.cpp`)
+            h = path.join(dest, `${options.namespace.toLowerCase()}_${n}.h`)
+            cpp = path.join(dest, `${options.namespace.toLowerCase()}_${n}.cpp`)
         } else {
             h = path.join(dest, `${n}.h`)
             cpp = path.join(dest, `${n}.cpp`)
